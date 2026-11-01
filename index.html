@@ -30,9 +30,26 @@
   #empty div{max-width:640px}#empty h1{color:var(--text);font-size:24px;margin:0 0 10px}
   #status{color:var(--dim);font-size:13px;flex-basis:100%;min-height:1em}
   #status.warn{color:var(--b)}
-  #show{position:fixed;right:6px;top:6px;z-index:9;display:none;opacity:.35;padding:6px 10px}
-  #show:hover{opacity:1}
-  body.cinema #bar{display:none}body.cinema #show{display:block}
+  /* No SBS a barra larga não serve para os óculos: cada metade recebe a mesma barrinha, que se funde em uma no 3D. */
+  #strips,#shows{display:none}
+  #strips{background:var(--bar);border-bottom:1px solid var(--line)}
+  .strip{flex:1;display:flex;flex-wrap:wrap;gap:6px;justify-content:center;padding:6px 4px;min-width:0}
+  .strip button{padding:8px 10px;font-size:14px;white-space:nowrap}
+  #shows{position:fixed;inset:0 0 auto 0;z-index:9;pointer-events:none}
+  #shows div{flex:1;display:flex;justify-content:flex-end;padding:6px}
+  #shows button{pointer-events:auto;opacity:.6;padding:6px 10px}
+  /* Menu grande para controle remoto (Rokid Station): só botões, sem precisar alcançar a barra. */
+  #menu{position:fixed;inset:0;z-index:20;background:var(--bg);display:none}
+  body.menu #menu{display:flex}
+  .mcol{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:12px;overflow:auto}
+  .mcol h2{margin:0;font-size:20px;letter-spacing:.06em}.mcol h2 b{color:var(--a)}
+  .mcol p{margin:0;color:var(--dim);font-size:13px;text-align:center}
+  .mcol .row{display:flex;flex-wrap:wrap;gap:10px;justify-content:center}
+  .mcol button{font-size:18px;padding:12px 18px}
+  button:focus{outline:3px solid var(--b);outline-offset:2px}
+  body.sbs #bar{display:none}
+  body.sbs:not(.cinema) #strips{display:flex}
+  body.cinema #bar{display:none}body.cinema #shows{display:flex}
   #seam{position:absolute;top:0;bottom:0;width:0;border-left:1px dashed rgba(131,226,200,.0);pointer-events:none}
 </style>
 </head>
@@ -61,6 +78,7 @@
     </div>
     <div id="status"></div>
   </div>
+  <div id="strips"></div>
   <div id="stage">
     <div id="g"><div id="f"><div id="b"><iframe id="frame" referrerpolicy="no-referrer-when-downgrade" allow="autoplay; encrypted-media; picture-in-picture"></iframe></div></div></div>
     <div id="copyWrap"><iframe id="copy" allow="autoplay; encrypted-media; picture-in-picture"></iframe></div>
@@ -71,7 +89,8 @@
     </div></div>
   </div>
 </div>
-<button id="show" title="Mostrar a barra">☰ Barra</button>
+<div id="shows"><div><button data-act="show">☰ Menu</button></div><div><button data-act="show">☰ Menu</button></div></div>
+<div id="menu"></div>
 <script>
 (function(){
   var $ = function(id){ return document.getElementById(id); };
@@ -100,8 +119,12 @@
   // A cópia independente do YouTube entra sem som, para não tocar o áudio duas vezes.
   function copyOf(u){ return /youtube-nocookie\.com\/embed\//.test(u) ? u+'&mute=1' : u; }
 
-  function open(raw){
+  function open(raw, fromMenu){
     var u = normalize(raw); if(!u) return;
+    if(fromMenu) document.body.classList.add('cinema');
+    hideMenu(); layout();
+    // Entrada extra no histórico: o botão Voltar do controle volta ao menu em vez de sair da página.
+    try{ history.pushState({sbs:1}, ''); }catch(e){}
     state.url = u; $('url').value = raw;
     applySandbox();
     frame.src = u;
@@ -146,13 +169,44 @@
 
   function setMode(m){
     state.mode = m; save('sbs.mode', m);
-    [].forEach.call(document.querySelectorAll('#modes button'), function(btn){ btn.classList.toggle('on', btn.dataset.mode===m); });
+    document.body.classList.toggle('sbs', m!=='normal');
+    [].forEach.call(document.querySelectorAll('[data-mode]'), function(btn){ btn.classList.toggle('on', btn.dataset.mode===m); });
     layout();
     if(m!=='normal') status(state.tech==='mirror'
       ? 'SBS ligado. Toque na metade esquerda; a direita é a cópia. Se a metade direita ficar vazia, este navegador não copia aquele site: troque para "Duas páginas".'
       : 'SBS com duas páginas: cada metade é um player separado. Dê play nas duas; podem ficar um pouco fora de sincronia e o som pode sair dobrado.');
     else status('Modo normal: navegue à vontade.');
   }
+
+  function renderMenu(){
+    var col = '<div class="mcol"><h2>PORTAL <b>SBS</b></h2><div class="row">'
+      + shortcuts.map(function(s, i){ return '<button data-open="'+i+'">'+s.name.replace(/</g,'&lt;')+'</button>'; }).join('')
+      + '<button data-menu="type">Digitar endereço</button></div><div class="row">'
+      + [['normal','Normal'],['half','SBS compacto'],['full','SBS largura dupla']].map(function(m){
+          return '<button data-mode="'+m[0]+'"'+(state.mode===m[0]?' class="on"':'')+'>'+m[1]+'</button>'; }).join('')
+      + '</div><div class="row">'+(state.url ? '<button data-menu="back">Voltar ao site</button>' : '')
+      + '<button data-menu="bar">Barra completa</button></div>'
+      + '<p>Botão Voltar do controle: volta a este menu.</p></div>';
+    $('menu').innerHTML = state.mode==='normal' ? col : col+col;
+  }
+  function showMenu(){
+    document.body.classList.add('menu'); renderMenu();
+    var first = $('menu').querySelector('button'); if(first) first.focus();
+  }
+  function hideMenu(){ document.body.classList.remove('menu'); }
+  $('menu').onclick = function(e){
+    var btn = e.target.closest('button'); if(!btn) return;
+    if(btn.dataset.open) open(shortcuts[+btn.dataset.open].url, true);
+    else if(btn.dataset.mode){ setMode(btn.dataset.mode); showMenu(); }
+    else if(btn.dataset.menu==='type'){ var u = prompt('Endereço do site:', 'https://'); if(u && u!=='https://') open(u, true); }
+    else if(btn.dataset.menu==='back'){ document.body.classList.add('cinema'); hideMenu(); layout(); try{ history.pushState({sbs:1}, ''); }catch(e){} }
+    else if(btn.dataset.menu==='bar'){ document.body.classList.remove('cinema'); hideMenu(); layout(); }
+  };
+  window.addEventListener('popstate', function(){ if(!document.body.classList.contains('menu')) showMenu(); });
+  document.addEventListener('keydown', function(e){
+    if(document.body.classList.contains('menu') || e.target.tagName==='INPUT') return;
+    if(e.key==='Escape' || e.key==='ContextMenu' || e.key==='m' || e.key==='M'){ e.preventDefault(); showMenu(); }
+  });
 
   function renderShortcuts(){
     var box=$('shortcuts'); box.innerHTML='';
@@ -171,12 +225,17 @@
     box.appendChild(add);
   }
 
+  var stripHtml = '<button data-mode="normal">Normal</button><button data-mode="half">Compacto</button>'
+    + '<button data-mode="full">Dupla</button><button data-act="cinema">Cinema</button>';
+  $('strips').innerHTML = '<div class="strip">'+stripHtml+'</div><div class="strip">'+stripHtml+'</div>';
+
   $('go').onsubmit=function(e){ e.preventDefault(); open($('url').value); };
-  [].forEach.call(document.querySelectorAll('#modes button'), function(btn){ btn.onclick=function(){ setMode(btn.dataset.mode); }; });
+  [].forEach.call(document.querySelectorAll('[data-mode]'), function(btn){ btn.onclick=function(){ setMode(btn.dataset.mode); }; });
+  function cinema(on){ document.body.classList.toggle('cinema', on); layout(); }
+  [].forEach.call(document.querySelectorAll('[data-act]'), function(btn){ btn.onclick=function(){ if(btn.dataset.act==='cinema') cinema(true); else showMenu(); }; });
   $('tech').onchange=function(){ state.tech=this.value; save('sbs.tech',state.tech); setMode(state.mode); };
   $('nopop').onchange=function(){ state.nopop=this.checked; save('sbs.nopop',state.nopop); if(state.url){ applySandbox(); frame.src=state.url; if(state.tech==='two'&&state.mode!=='normal') copy.src=state.url; } };
-  $('cinema').onclick=function(){ document.body.classList.add('cinema'); layout(); };
-  $('show').onclick=function(){ document.body.classList.remove('cinema'); layout(); };
+  $('cinema').onclick=function(){ cinema(true); };
   $('fs').onclick=function(){
     var d=document, el=d.documentElement;
     if(d.fullscreenElement||d.webkitFullscreenElement){ (d.exitFullscreen||d.webkitExitFullscreen).call(d); return; }
@@ -195,7 +254,7 @@
   var params = new URLSearchParams(location.hash.slice(1));
   setMode(params.get('modo') || load('sbs.mode','normal'));
   if(!supportsReflect) status('Este navegador não tem a função de cópia espelhada; usando duas páginas.', true);
-  if(params.get('url')) open(params.get('url'));
+  if(params.get('url')) open(params.get('url')); else showMenu();
 })();
 </script>
 </body>
