@@ -127,7 +127,8 @@
     try{ history.pushState({sbs:1}, ''); }catch(e){}
     state.url = u; $('url').value = raw;
     applySandbox();
-    frame.src = u;
+    // replace() não cria entrada no histórico: o Voltar do controle cai no menu, não numa página em branco.
+    try{ frame.contentWindow.location.replace(u); }catch(e){ frame.src = u; }
     if(state.tech==='two' && state.mode!=='normal') copy.src = copyOf(u);
     $('empty').style.display='none';
     var host=''; try{ host=new URL(u).hostname; }catch(e){}
