@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#0a111b">
+<title>Portal SBS Web</title>
+<style>
+  :root{--bg:#0a111b;--bar:#111c2b;--line:#24364d;--text:#e7eef7;--dim:#93a4b8;--a:#83e2c8;--b:#e8c491}
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:#000;color:var(--text);font:15px/1.3 system-ui,Segoe UI,Roboto,sans-serif;overflow:hidden}
+  #app{display:flex;flex-direction:column;height:100%}
+  #bar{background:var(--bar);border-bottom:1px solid var(--line);padding:8px 10px;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+  .brand{font-weight:700;letter-spacing:.06em;white-space:nowrap}.brand b{color:var(--a)}
+  form{display:flex;gap:6px;flex:1 1 320px;min-width:0}
+  input[type=text]{flex:1;min-width:0;background:#060b12;color:var(--text);border:1px solid var(--line);border-radius:8px;padding:10px 12px;font-size:16px}
+  button,select{background:#1b2b40;color:var(--text);border:1px solid var(--line);border-radius:8px;padding:9px 12px;font-size:15px;cursor:pointer}
+  button.on{background:var(--a);color:#06221a;border-color:var(--a);font-weight:700}
+  button.primary{background:var(--b);color:#2a1b05;border-color:var(--b);font-weight:700}
+  #shortcuts{display:flex;gap:6px;flex-wrap:wrap}
+  #shortcuts button{padding:7px 10px}
+  .group{display:flex;gap:4px;align-items:center}
+  label.chk{display:flex;gap:5px;align-items:center;color:var(--dim);font-size:13px;white-space:nowrap}
+  #stage{position:relative;flex:1;overflow:hidden;background:#000}
+  #g{position:absolute;left:0;top:0;transform-origin:0 0}
+  #f,#b,#copy{width:100%;height:100%}
+  #copyWrap{position:absolute;top:0;display:none}
+  iframe{display:block;width:100%;height:100%;border:0;background:#fff}
+  #empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:20px;text-align:center;color:var(--dim);background:var(--bg)}
+  #empty div{max-width:640px}#empty h1{color:var(--text);font-size:24px;margin:0 0 10px}
+  #status{color:var(--dim);font-size:13px;flex-basis:100%;min-height:1em}
+  #status.warn{color:var(--b)}
+  #show{position:fixed;right:6px;top:6px;z-index:9;display:none;opacity:.35;padding:6px 10px}
+  #show:hover{opacity:1}
+  body.cinema #bar{display:none}body.cinema #show{display:block}
+  #seam{position:absolute;top:0;bottom:0;width:0;border-left:1px dashed rgba(131,226,200,.0);pointer-events:none}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="bar">
+    <span class="brand">PORTAL <b>SBS</b> WEB</span>
+    <form id="go">
+      <input id="url" type="text" inputmode="url" autocomplete="off" placeholder="Endereço do site ou link do YouTube">
+      <button class="primary" type="submit">Abrir</button>
+    </form>
+    <div id="shortcuts"></div>
+    <div class="group" id="modes">
+      <button data-mode="normal">Normal</button>
+      <button data-mode="half">SBS compacto</button>
+      <button data-mode="full">SBS largura dupla</button>
+    </div>
+    <div class="group">
+      <select id="tech" title="Como a segunda metade é feita">
+        <option value="mirror">Cópia espelhada (1 sessão, sincronizada)</option>
+        <option value="two">Duas páginas (fora de sincronia)</option>
+      </select>
+      <label class="chk"><input type="checkbox" id="nopop"> Bloquear pop-ups</label>
+      <button id="cinema">Modo cinema</button>
+      <button id="fs">Tela cheia</button>
+    </div>
+    <div id="status"></div>
+  </div>
+  <div id="stage">
+    <div id="g"><div id="f"><div id="b"><iframe id="frame" referrerpolicy="no-referrer-when-downgrade" allow="autoplay; encrypted-media; picture-in-picture"></iframe></div></div></div>
+    <div id="copyWrap"><iframe id="copy" allow="autoplay; encrypted-media; picture-in-picture"></iframe></div>
+    <div id="empty"><div>
+      <h1>Escolha um atalho ou digite um site</h1>
+      <p>Navegue no modo <b>Normal</b>. Quando o vídeo começar, escolha <b>SBS compacto</b> e depois <b>Modo cinema</b>. No SBS, toque sempre na <b>metade esquerda</b>: a direita é só a cópia da imagem.</p>
+      <p>Se a página ficar em branco ou mostrar erro, aquele site não permite ser aberto dentro de outra página.</p>
+    </div></div>
+  </div>
+</div>
+<button id="show" title="Mostrar a barra">☰ Barra</button>
+<script>
+(function(){
+  var $ = function(id){ return document.getElementById(id); };
+  var stage=$('stage'), g=$('g'), f=$('f'), b=$('b'), frame=$('frame'), copyWrap=$('copyWrap'), copy=$('copy');
+  var supportsReflect = window.CSS && CSS.supports && CSS.supports('-webkit-box-reflect','right 0px');
+  var defaults = [{name:'Teste', url:new URL('teste-video.html', location.href).href}, {name:'YouTube', url:'https://www.youtube.com/watch?v=aqz-KE-bpKQ'}];
+  var state = {mode:'normal', tech: supportsReflect ? 'mirror' : 'two', nopop:false, url:''};
+
+  function load(key, fallback){ try{ var v=localStorage.getItem(key); return v ? JSON.parse(v) : fallback; }catch(e){ return fallback; } }
+  function save(key, v){ try{ localStorage.setItem(key, JSON.stringify(v)); }catch(e){} }
+  var shortcuts = load('sbs.shortcuts', defaults);
+
+  function status(msg, warn){ var s=$('status'); s.textContent=msg||''; s.className=warn?'warn':''; }
+
+  // Endereços que o site bloqueia em iframe, mas têm uma versão que pode ser incorporada.
+  function normalize(raw){
+    var u = (raw||'').trim(); if(!u) return '';
+    if(!/^https?:\/\//i.test(u)) u = /\s/.test(u) || !/\./.test(u) ? 'https://duckduckgo.com/html/?q='+encodeURIComponent(u) : 'https://'+u;
+    var m = u.match(/(?:youtube\.com\/(?:watch\?(?:.*&)?v=|shorts\/|live\/)|youtu\.be\/)([\w-]{11})/i);
+    if(m) return 'https://www.youtube-nocookie.com/embed/'+m[1]+'?autoplay=1&playsinline=1';
+    return u;
+  }
+  var blockedHint = {'youtube.com':'O YouTube não abre a página inicial aqui. Cole o link de um vídeo (youtube.com/watch?v=...) que ele abre no player.',
+                     'startflix':'Este site bloqueia ser aberto dentro de outra página (X-Frame-Options). Não vai funcionar aqui.'};
+
+  // A cópia independente do YouTube entra sem som, para não tocar o áudio duas vezes.
+  function copyOf(u){ return /youtube-nocookie\.com\/embed\//.test(u) ? u+'&mute=1' : u; }
+
+  function open(raw){
+    var u = normalize(raw); if(!u) return;
+    state.url = u; $('url').value = raw;
+    applySandbox();
+    frame.src = u;
+    if(state.tech==='two' && state.mode!=='normal') copy.src = copyOf(u);
+    $('empty').style.display='none';
+    var host=''; try{ host=new URL(u).hostname; }catch(e){}
+    var hint='';
+    if(/(^|\.)youtube\.com$/.test(host) && !/\/embed\//.test(u)) hint=blockedHint['youtube.com'];
+    else if(/startflix/.test(host)) hint=blockedHint['startflix'];
+    status(hint || 'Abrindo '+host+' … se ficar em branco, o site não permite ser aberto dentro de outra página.', !!hint);
+  }
+
+  function applySandbox(){
+    [frame, copy].forEach(function(el){
+      if(state.nopop) el.setAttribute('sandbox','allow-scripts allow-same-origin allow-forms allow-presentation allow-pointer-lock');
+      else el.removeAttribute('sandbox');
+    });
+  }
+
+  function layout(){
+    var S = stage.clientWidth, H = stage.clientHeight;
+    var sbs = state.mode!=='normal';
+    // W = largura em que o site é desenhado; cada olho ocupa S/2 na tela.
+    var W = !sbs ? S : (state.mode==='half' ? S : Math.floor(S/2));
+    var scale = state.mode==='half' ? 0.5 : 1;
+    g.style.width = W+'px'; g.style.height = H+'px';
+    g.style.transform = scale===1 ? '' : 'scaleX('+scale+')';
+    var mirror = sbs && state.tech==='mirror';
+    // Duas reflexões seguidas = imagem na orientação certa. A 1ª joga uma cópia espelhada para fora da tela
+    // (de 2W a 3W); a 2ª reflete essa cópia de volta para W..2W, desespelhada. O resto fica cortado pelo palco.
+    b.style.webkitBoxReflect = mirror ? 'right '+W+'px' : '';
+    f.style.webkitBoxReflect = mirror ? 'right '+(2*W)+'px' : '';
+    var two = sbs && state.tech==='two';
+    copyWrap.style.display = two ? 'block' : 'none';
+    if(two){
+      copyWrap.style.left = (W*scale)+'px'; copyWrap.style.width = W+'px'; copyWrap.style.height = H+'px';
+      copyWrap.style.transformOrigin='0 0'; copyWrap.style.transform = g.style.transform;
+      var copyUrl = copyOf(state.url);
+      if(state.url && copy.src!==copyUrl) copy.src = copyUrl;
+    } else if(copy.getAttribute('src')) { copy.removeAttribute('src'); }
+  }
+
+  function setMode(m){
+    state.mode = m; save('sbs.mode', m);
+    [].forEach.call(document.querySelectorAll('#modes button'), function(btn){ btn.classList.toggle('on', btn.dataset.mode===m); });
+    layout();
+    if(m!=='normal') status(state.tech==='mirror'
+      ? 'SBS ligado. Toque na metade esquerda; a direita é a cópia. Se a metade direita ficar vazia, este navegador não copia aquele site: troque para "Duas páginas".'
+      : 'SBS com duas páginas: cada metade é um player separado. Dê play nas duas; podem ficar um pouco fora de sincronia e o som pode sair dobrado.');
+    else status('Modo normal: navegue à vontade.');
+  }
+
+  function renderShortcuts(){
+    var box=$('shortcuts'); box.innerHTML='';
+    shortcuts.forEach(function(s, i){
+      var btn=document.createElement('button'); btn.type='button'; btn.textContent=s.name; btn.title=s.url+' (segure ou clique com o botão direito para apagar)';
+      btn.onclick=function(){ open(s.url); };
+      btn.oncontextmenu=function(e){ e.preventDefault(); if(confirm('Apagar o atalho '+s.name+'?')){ shortcuts.splice(i,1); save('sbs.shortcuts',shortcuts); renderShortcuts(); } };
+      box.appendChild(btn);
+    });
+    var add=document.createElement('button'); add.type='button'; add.textContent='+ atalho';
+    add.onclick=function(){
+      var url=prompt('Endereço do site:', $('url').value||'https://'); if(!url) return;
+      var name=prompt('Nome do atalho:', url.replace(/^https?:\/\/(www\.)?/,'').split(/[\/.]/)[0]); if(!name) return;
+      shortcuts.push({name:name, url:url}); save('sbs.shortcuts',shortcuts); renderShortcuts();
+    };
+    box.appendChild(add);
+  }
+
+  $('go').onsubmit=function(e){ e.preventDefault(); open($('url').value); };
+  [].forEach.call(document.querySelectorAll('#modes button'), function(btn){ btn.onclick=function(){ setMode(btn.dataset.mode); }; });
+  $('tech').onchange=function(){ state.tech=this.value; save('sbs.tech',state.tech); setMode(state.mode); };
+  $('nopop').onchange=function(){ state.nopop=this.checked; save('sbs.nopop',state.nopop); if(state.url){ applySandbox(); frame.src=state.url; if(state.tech==='two'&&state.mode!=='normal') copy.src=state.url; } };
+  $('cinema').onclick=function(){ document.body.classList.add('cinema'); layout(); };
+  $('show').onclick=function(){ document.body.classList.remove('cinema'); layout(); };
+  $('fs').onclick=function(){
+    var d=document, el=d.documentElement;
+    if(d.fullscreenElement||d.webkitFullscreenElement){ (d.exitFullscreen||d.webkitExitFullscreen).call(d); return; }
+    var req=el.requestFullscreen||el.webkitRequestFullscreen;
+    if(req) try{ var p=req.call(el); if(p&&p.catch) p.catch(function(){ status('Este navegador não deixou entrar em tela cheia. Use o Modo cinema.',true); }); }catch(e){}
+  };
+  window.addEventListener('resize', layout);
+  window.addEventListener('hashchange', function(){ var p=new URLSearchParams(location.hash.slice(1)); if(p.get('modo')) setMode(p.get('modo')); if(p.get('url')) open(p.get('url')); });
+  document.addEventListener('fullscreenchange', layout);
+
+  state.tech = load('sbs.tech', state.tech); if(!supportsReflect) state.tech='two';
+  state.nopop = load('sbs.nopop', false);
+  $('tech').value = state.tech; $('nopop').checked = state.nopop;
+  if(!supportsReflect) { $('tech').options[0].disabled = true; }
+  renderShortcuts();
+  var params = new URLSearchParams(location.hash.slice(1));
+  setMode(params.get('modo') || load('sbs.mode','normal'));
+  if(!supportsReflect) status('Este navegador não tem a função de cópia espelhada; usando duas páginas.', true);
+  if(params.get('url')) open(params.get('url'));
+})();
+</script>
+</body>
+</html>
